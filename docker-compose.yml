@@ -1,0 +1,81 @@
+version: '3'
+
+services:
+  #SSL Certificates
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - docker-network
+
+  # Reverse Proxy
+  nginx:
+    image: nginx:1.15-alpine
+    restart: unless-stopped
+    volumes:
+      - ./data/nginx:/etc/nginx/conf.d
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    ports:
+      - "80:80"
+      - "443:443"
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+    networks:
+      - docker-network
+    depends_on:
+      spring-boot-app:
+        condition: service_started
+
+  # Database Service
+  mysql-db:
+    image: mysql:latest
+    ports:
+      - '3306:3306'
+    environment:
+      MYSQL_DATABASE: 'AndysWaterDispatch'
+      MYSQL_USER: 'JavaApplication'
+      MYSQL_PASSWORD: 'AndysWaterDatabase2023!'
+      MYSQL_ROOT_PASSWORD: 'AndysWater2020!'
+    volumes:
+      - mysql-db-data:/var/lib/mysql
+    networks:
+      - docker-network
+    restart: always
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      #  start_period: 10s
+
+  # Application Service
+  spring-boot-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql-db:
+        condition: service_healthy
+    restart: always
+    networks:
+      - docker-network
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - TZ=Australia/Adelaide
+    entrypoint: [ "java", "-Xms256m", "-Xmx1024m", "-jar", "/app/AndysWaterDispatch.jar" ]
+
+
+# Volumes definition
+volumes:
+  mysql-db-data:
+
+# Networks definition
+networks:
+  docker-network:
+    driver: bridge
